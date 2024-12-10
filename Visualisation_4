@@ -1,0 +1,95 @@
+with t1 AS (
+  SELECT
+    time :: DATE AS date,
+    COUNT (DISTINCT order_id) :: int as orders
+  FROM
+    user_actions
+  WHERE
+    action = 'create_order'
+    AND order_id NOT IN (
+      SELECT
+        order_id
+      FROM
+        user_actions
+      WHERE
+        action = 'cancel_order'
+    )
+  GROUP BY
+    date
+),
+-- рассчитали общее число заказов
+t2 AS (
+  SELECT
+    date,
+    COUNT (user_id) :: int as first_orders
+  FROM(
+      SELECT
+        MIN(time) :: DATE AS date,
+        user_id
+      FROM
+        user_actions
+      WHERE
+        action = 'create_order'
+        AND order_id NOT IN (
+          SELECT
+            order_id
+          FROM
+            user_actions
+          WHERE
+            action = 'cancel_order'
+        )
+      GROUP BY
+        user_id
+    ) t
+  GROUP BY
+    date
+),
+-- рассчитали число первых заказов (заказов, сделанных пользователями впервые)
+t3 AS(
+  SELECT
+    t4.date,
+    COALESCE(COUNT(order_id), 0) :: int AS new_users_orders
+  FROM(
+      SELECT
+        MIN(time) :: DATE as date,
+        user_id
+      FROM
+        user_actions
+      GROUP BY
+        user_id
+    ) t4 -- для каждого пользователя нашли дату совершения первого действия
+    LEFT JOIN (
+      SELECT
+        time :: DATE AS date,
+        user_id,
+        order_id
+      FROM
+        user_actions
+      WHERE
+        order_id NOT IN (
+          select
+            order_id
+          from
+            user_actions
+          where
+            action = 'cancel_order'
+        )
+    ) t5 --таблица с общим числом заказов на каждую дату для каждого пользователя
+    ON t4.date = t5.date
+    AND t4.user_id = t5.user_id
+  GROUP BY
+    t4.date
+) -- рассчитали число новых пользователей (заказов, сделанных пользователями в тот же день, когда они впервые воспользовались сервисом)
+SELECT
+  date,
+  orders,
+  first_orders,
+  new_users_orders,
+  ROUND (100 * first_orders / orders :: DECIMAL, 2) AS first_orders_share,
+  ROUND (100 * new_users_orders / orders :: DECIMAL, 2) AS new_users_orders_share
+FROM
+  t1
+  LEFT JOIN t2 USING (date)
+  LEFT JOIN t3 USING (date)
+ORDER BY
+  date
